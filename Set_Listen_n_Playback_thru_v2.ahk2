@@ -1,0 +1,163 @@
+﻿;AHK 2.0, tested with Win7/Win10
+;this script sets "Listen to this device/playback through this device" for selected device(s)
+;usage example:
+;       Set_Listen_n_Playback_thru.ahk "Spk (Logitech G35 Headset)" "Line 1" "Line 2"
+;to increase the rate:
+;       for Playback or Recording devices window,
+;       Right click -> show disabled devices:untick, show d/ced devices:untick
+
+t:=A_TickCount
+#SingleInstance force
+A_WinDelay:=-1 ;default:100
+A_ControlDelay:=-1 ;default:20
+;Although a delay of -1 (no delay at all) is allowed,
+;       it is recommended that at least 0 be used, to increase confidence
+;       that the script will run correctly even when the CPU is under load.
+A_KeyDelay:=-1
+;A short delay (sleep) is done automatically after every keystroke sent by Send or ControlSend.
+;       This is done to improve the reliability of scripts because
+;       a window sometimes can't keep up with a rapid flood of keystrokes.
+#KeyHistory 0 ;is used to "log your keys".
+A_ListLines:=0 ;performance is reduced by a few % while line logging is enabled.
+
+if(A_Args.Length()<2){
+        MsgBox("ERROR: This script requires at least 2 parameters:`n"
+                . "1: Device to be set for playback thru,`n2..n: Device(s) to be listened to.",,"T30 Iconx")
+        ExitApp()
+}
+global mm:=New mmsys()
+global oo:=[] ;InputBox
+OnExit("ExitFunc")
+
+for i,b in A_Args
+        i=1 ? a:=b:mm.SetListenPlaybackThru(a, b)
+ExitApp()
+
+
+ExitFunc(){
+        mm.close()
+}
+
+
+class mmsys{
+        __New(){
+;Run("mmsys.cpl",,"Max",PID)
+                this.os:=StrSplit(A_OSVersion,".")[1]  ;get major os ver
+                Run("mmsys.cpl")
+                this.t1:="ahk_class #32770 ahk_exe rundll32.exe"
+                this.t2:=""
+                WinWait(this.t1), this.t:=WinGetTitle(t1) " " this.t1  ;window title: "Sound"|"Звук" etc
+        }
+
+        SetListenPlaybackThru(_a, _b){
+                WinWait(this.t)
+
+                ;ControlSend("{Right}", "SysTabControl321") ;Playback -> Recording tab:
+                ControlSetTab(2,"SysTabControl321")  ;focus to Recording tab
+;                while(ControlGetTab("SysTabControl321")!=2)
+
+;wait untill SysListView321 is populated:
+                loop
+                        c:=ControlGetList("Col1", "SysListView321")
+                until(!ErrorLevel)
+;Rows r delimited by linefeeds (`n)
+;       "Mic3   Virtual Audio Cable     Default Device"
+;       "Line1  Virtual Audio Cable     Ready"
+;Fields (columns) in each row r delimited by tabs (A_Tab)
+                n:=0
+                for i,k in StrSplit(c, "`n"){
+                        if(k=_b){
+                                n:=i
+                                break
+                        }
+                }
+                if(!n)
+                        CantFindBox("Couldn't find recording device:", _b, c)
+;custom ListView here so we cannot use ControlChoose(n,"SysListView321"):
+                ControlSend("{Home}{Down " n-1 "}","SysListView321")
+                ControlClick("Button3") ;[&Properties]
+
+;"Device properties" window:
+                WinWait(this.t2:=_b " " this.t1)
+                ControlSetTab(2,"SysTabControl321") ;focus to "Listen" tab
+;                while(ControlGetTab("SysTabControl321")!=2)
+
+;                msgbox(Arr2JSON(WinGetControls(_b " " this.t1)))
+
+;wait untill ComboBox1 is populated:
+                loop
+                        d:=ControlGetList("", "ComboBox1")
+                until(!ErrorLevel)
+
+;ComboBox1 = playback through this device:
+;       Default playback device
+;       Line 1 (Virtual Audio Cable)
+;       Spk (ASUS XONAR PHOEBUS)
+                n:=0
+                for i,k in StrSplit(d,"`n"){
+                        if(k=_a){
+                                n:=i
+                                break
+                        }
+                }
+                if(!n)
+                        CantFindBox("Couldn't find listen-to device:", _a, d)
+                ControlSend("{Home}{Down " n-1 "}","ComboBox1")
+;        ControlChoose(n,"ComboBox1")
+                ControlSetChecked(1,"Button1") ;Listen to this device
+;                ControlSetChecked(1,"Button3") ;Continue running when on battery power
+;                ControlSetChecked(1,"Button6") ;Do not prompt when this device is plugged in
+
+;ok|apply|cancel: Win10: 5-6-7, Win7: 7-8-9
+                ControlClick("Button" (this.os>6 ? "5":"7"))  ;[OK]  close "Properties"
+        }
+
+;TabCount:=SendMessage(0x1304,,, "SysTabControl321", t)
+
+;a:=ControlGetFocus("Sound " t) 
+;ControlFocus("SysTabControl321", t) ;SysListView321 focused by default
+
+;to get some control's text:
+        ;a:=WinGetControls(t)
+        ;b:=WinGetControlsHwnd(t)
+        ;VarSetCapacity(buf, 32767 * (A_IsUnicode ? 2 : 1))
+        ;DllCall("GetWindowText", "Ptr", b[1], "Str", buf, "Int", 32767)
+        ;MsgBox(a[1] "/" buf) ;text of the active tab
+        ;;b[12]=SysTabControl321, [15]=SysListView322
+        ;buf:=""
+
+        close(){
+                if(this.t2)
+                        WinKill(this.t2) ;close "Properties"
+                WinKill(this.t) ;close "Sound"
+        }
+}
+
+
+CantFindBox(_m, _d, _s){
+        if(!(o:=oo)[1]){
+                g:=o[1]:=GuiCreate(, "ERROR")
+                xm:=3,ym:=3, g.marginX:=2,g.marginY:=2
+                g.Add("Text","x" xm " y" ym " w252", _m).SetFont("cRed bold")
+                        o[2]:=(g.Add("Edit","xp w250 r1 ReadOnly", _d)).SetFont("cGray norm", "Verdana")
+                g.Add("Text","xp w150", "Available devices list:")
+                o[3]:=(g.Add("Edit","xp w250 r5 ReadOnly", _s)).SetFont("cGray norm", "Verdana")
+                o[4]:=g.Add("Button", "x" xm+216 " Default", " Ok ")
+                        o[4].OnEvent("Click", "CantFindClose"), o[4].Focus()
+                g.OnEvent("Close", "CantFindClose"), g.OnEvent("Escape", "CantFindClose")
+                g.Show("AutoSize")
+                Sleep(1000*60) ;timeout 60s
+        }
+}
+CantFindClose(){
+        g:=oo[1]
+        g.Destroy(), oo[1]:=""
+        ExitApp()
+}
+;format [associative] arrays as JSON string:
+Arr2JSON(_j){ ;recursive
+        s:=""
+        for x,y in _j
+                s.=x ":" (isObject(y) ? Arr2JSON(y):Type(y)="String" ? "'" y "'":y) ","
+        return(a ? "[" Rtrim(s,", ") "]":"{" Rtrim(s,", ") "}") ;wrap to brackets:
+}
